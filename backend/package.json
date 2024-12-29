@@ -7,10 +7,12 @@
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "axios": "^1.6.5",
     "cors": "^2.8.5",
+    "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-session": "^1.17.3",
     "memorystore": "^1.6.7",
+    "mongoose": "^8.9.2",
     "node-telegram-bot-api": "^0.64.0",
     "passport": "^0.7.0",
     "passport-azure-ad": "^4.3.5"

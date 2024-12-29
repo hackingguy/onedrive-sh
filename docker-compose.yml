@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - MONGODB_URI=mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017/onedrive-telegram?authSource=admin
+      - SESSION_SECRET=${SESSION_SECRET}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - FRONTEND_URL=http://localhost:3001
+    depends_on:
+      - mongodb
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_data: 

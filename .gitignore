@@ -53,4 +53,10 @@ dist/
 coverage/
 
 # nyc test coverage
-.nyc_output/ 
+.nyc_output/
+
+# Add these lines to existing .gitignore
+*.pem
+*.key
+mongodb/
+.mongodb/ 

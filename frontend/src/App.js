@@ -9,27 +9,42 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_URL}/test-graph`, {
-      credentials: 'include'
-    })
-    .then(response => {
-      if (response.ok) {
-        return response.json();
+    checkAuthStatus();
+  }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/check-session`, {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-      throw new Error('Not authenticated');
-    })
-    .then(data => {
-      setIsAuthenticated(true);
-      setUserName(data.user.displayName);
-    })
-    .catch(() => {
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new TypeError("Received non-JSON response from server");
+      }
+
+      const data = await response.json();
+      
+      setIsAuthenticated(data.isAuthenticated);
+      if (data.isAuthenticated && data.user) {
+        setUserName(data.user.displayName);
+      }
+    } catch (error) {
+      console.error('Auth check failed:', error);
       setIsAuthenticated(false);
       setUserName('');
-    })
-    .finally(() => {
+    } finally {
       setIsLoading(false);
-    });
-  }, []);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -42,10 +57,19 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Home isAuthenticated={isAuthenticated} userName={userName} />} />
+        <Route 
+          path="/" 
+          element={<Home isAuthenticated={isAuthenticated} userName={userName} />} 
+        />
         <Route 
           path="/dashboard" 
-          element={isAuthenticated ? <Dashboard userName={userName} /> : <Navigate to="/" />} 
+          element={
+            isAuthenticated ? (
+              <Dashboard userName={userName} />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
         />
         <Route 
           path="/signout" 

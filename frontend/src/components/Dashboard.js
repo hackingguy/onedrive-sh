@@ -64,14 +64,33 @@ function Dashboard({ userName }) {
     }
     setIsWebhookLoading(true);
     try {
+      console.log('Sending delete webhook request to:', `${process.env.REACT_APP_API_URL}/delete-webhook`);
       const response = await fetch(`${process.env.REACT_APP_API_URL}/delete-webhook`, {
         method: 'POST',
-        credentials: 'include'
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
       });
-      await response.json();
-      checkWebhookStatus();
+
+      console.log('Delete webhook response status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Delete webhook response:', data);
+
+      if (data.success) {
+        await checkWebhookStatus();
+      } else {
+        throw new Error(data.error || 'Failed to delete webhook');
+      }
     } catch (error) {
       console.error('Error deleting webhook:', error);
+      alert('Error deleting webhook: ' + error.message);
     } finally {
       setIsWebhookLoading(false);
     }
