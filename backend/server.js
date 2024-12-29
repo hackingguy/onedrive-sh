@@ -10,6 +10,7 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
+const cors = require('cors');
 
 // Start with app initialization
 const app = express();
@@ -105,185 +106,38 @@ app.get('/auth/callback', async (req, res) => {
         // Store token globally
         globalAccessToken = tokenResponse.accessToken;
         
-        res.redirect('/dashboard');
+        // Redirect to frontend dashboard
+        res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
     } catch (error) {
         console.error('Auth error:', error);
-        res.status(500).send('Authentication failed');
+        res.redirect(`${process.env.FRONTEND_URL}?error=auth_failed`);
     }
 });
 
 app.get('/auth/signout', (req, res) => {
     req.session.destroy();
-    res.redirect('/');
+    res.redirect(process.env.FRONTEND_URL || 'http://localhost:3001');
 });
 
-app.get('/dashboard', ensureAuthenticated, (req, res) => {
-    res.send(`
-        <h1>Dashboard</h1>
-        <p>Welcome ${req.session.user.name || req.session.user.username}!</p>
-        <div style="margin-bottom: 20px;">
-            <div id="webhookButtons"></div>
-            <button onclick="checkWebhookStatus()">Check Webhook Status</button>
-        </div>
-        <pre id="webhookStatus"></pre>
-        <br><br>
-        <button onclick="testGraph()">Test Graph API</button>
-        <pre id="testResult"></pre>
-        <br>
-        <h3>Test File Upload</h3>
-        <input type="file" id="fileInput" />
-        <button onclick="uploadFile()">Upload to OneDrive</button>
-        <br><br>
-        <a href="/">Home</a>
-        <a href="/auth/signout">Sign Out</a>
-
-        <script>
-        async function checkWebhookStatus() {
-            try {
-                const response = await fetch('/webhook-status');
-                const data = await response.json();
-                
-                const displayData = {
-                    ...data,
-                    activeSubscription: data.activeSubscription || 'No active webhook',
-                    allSubscriptions: data.allSubscriptions || []
-                };
-
-                document.getElementById('webhookStatus').textContent = 
-                    JSON.stringify(displayData, null, 2);
-                
-                updateWebhookButtons(data);
-            } catch (error) {
-                document.getElementById('webhookStatus').textContent = 
-                    'Error checking webhook status: ' + error;
-                updateWebhookButtons({ hasActiveWebhook: false, webhookCount: 0 });
-            }
-        }
-
-        function updateWebhookButtons(statusData) {
-            const buttonContainer = document.getElementById('webhookButtons');
-            const hasWebhook = statusData.hasActiveWebhook;
-            const count = statusData.webhookCount || 0;
-
-            if (hasWebhook) {
-                buttonContainer.innerHTML = 
-                    '<button onclick="deleteWebhook()" style="background-color: #ff4444; color: white;">' +
-                    'Delete Webhook' + (count > 1 ? 's' : '') + ' (' + count + ')' +
-                    '</button>';
-            } else {
-                buttonContainer.innerHTML = '<button onclick="setupWebhook()">Setup Webhook</button>';
-            }
-        }
-
-        window.onload = checkWebhookStatus;
-
-        async function deleteWebhook() {
-            if (!confirm('Are you sure you want to delete the webhook?')) {
-                return;
-            }
-            try {
-                const response = await fetch('/delete-webhook', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const data = await response.json();
-                alert(data.message);
-                checkWebhookStatus();
-            } catch (error) {
-                alert('Error deleting webhook: ' + error);
-            }
-        }
-
-        async function setupWebhook() {
-            try {
-                const response = await fetch('/setup-webhook', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const data = await response.json();
-                alert(data.success ? 'Webhook setup successful!' : 'Webhook setup failed');
-                checkWebhookStatus();
-            } catch (error) {
-                alert('Error setting up webhook: ' + error);
-            }
-        }
-
-        async function testGraph() {
-            try {
-                const response = await fetch('/test-graph');
-                const data = await response.json();
-                document.getElementById('testResult').textContent = 
-                    JSON.stringify(data, null, 2);
-            } catch (error) {
-                document.getElementById('testResult').textContent = 
-                    'Error: ' + error.message;
-            }
-        }
-
-        async function uploadFile() {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
-            if (!file) {
-                alert('Please select a file first');
-                return;
-            }
-
-            try {
-                // Get upload URL
-                const response = await fetch('/upload-test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fileName: file.name })
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || 'Failed to get upload URL');
-                }
-
-                const data = await response.json();
-                console.log('Upload session created:', data);
-
-                // Constants for chunked upload
-                const maxChunkSize = 4 * 1024 * 1024; // 4MB chunks
-                const fileSize = file.size;
-                let start = 0;
-
-                while (start < fileSize) {
-                    const end = Math.min(start + maxChunkSize, fileSize);
-                    const chunk = file.slice(start, end);
-                    
-                    const uploadResponse = await fetch(data.uploadUrl, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Length': (end - start).toString(),
-                            'Content-Range': \`bytes \${start}-\${end - 1}/\${fileSize}\`
-                        },
-                        body: chunk
-                    });
-
-                    if (!uploadResponse.ok) {
-                        const errorText = await uploadResponse.text();
-                        throw new Error(\`Upload failed: \${uploadResponse.status} \${uploadResponse.statusText} - \${errorText}\`);
-                    }
-
-                    // If this is the last chunk, get the response
-                    if (end === fileSize) {
-                        const uploadResult = await uploadResponse.json();
-                        console.log('Upload completed:', uploadResult);
-                    }
-
-                    start = end;
-                }
-                
-                alert('File uploaded successfully to OneDrive root folder!');
-            } catch (error) {
-                console.error('Upload error:', error);
-                alert('Error uploading file: ' + error.message);
-            }
-        }
-        </script>
-    `);
+app.get('/dashboard-data', ensureAuthenticated, async (req, res) => {
+    try {
+        const client = getAuthenticatedClient(req.session.accessToken);
+        const user = await client.api('/me').get();
+        
+        res.json({
+            user: {
+                name: user.displayName,
+                email: user.userPrincipalName
+            },
+            isAuthenticated: true
+        });
+    } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+        res.status(500).json({ 
+            error: error.message,
+            isAuthenticated: false 
+        });
+    }
 });
 
 app.get('/test-graph', ensureAuthenticated, async (req, res) => {
@@ -326,25 +180,21 @@ app.post('/setup-webhook', ensureAuthenticated, async (req, res) => {
         
         // Check for existing subscriptions
         const existingSubscriptions = await client.api('/subscriptions').get();
-        console.log('Found existing subscriptions:', existingSubscriptions.value.length);
-
-        // Delete subscriptions that match our applicationId
+        
+        // Delete all existing subscriptions with our applicationId
         for (const sub of existingSubscriptions.value) {
             if (sub.applicationId === config.auth.clientId) {
-                console.log('Deleting our subscription:', sub.id);
                 try {
                     await client.api(`/subscriptions/${sub.id}`).delete();
+                    console.log('Deleted existing subscription:', sub.id);
                 } catch (deleteError) {
                     console.error('Error deleting subscription:', sub.id, deleteError);
                 }
-            } else {
-                console.log('Skipping subscription:', sub.id);
             }
         }
         
         // Get the user's drive ID
         const drive = await client.api('/me/drive').get();
-        console.log('Drive info:', drive);
 
         const subscriptionData = {
             changeType: "updated",
@@ -354,12 +204,8 @@ app.post('/setup-webhook', ensureAuthenticated, async (req, res) => {
             clientState: process.env.WEBHOOK_SECRET
         };
 
-        console.log('Setting up new webhook with:', subscriptionData);
-
         const subscription = await client.api('/subscriptions')
             .post(subscriptionData);
-
-        console.log('Subscription created:', subscription);
         
         // Save the active subscription
         activeSubscription = subscription;
@@ -368,7 +214,7 @@ app.post('/setup-webhook', ensureAuthenticated, async (req, res) => {
         res.json({ 
             success: true, 
             subscription,
-            message: 'New webhook subscription created and old ones removed'
+            message: 'New webhook subscription created'
         });
     } catch (error) {
         console.error('Error setting up webhook:', error);
@@ -416,8 +262,53 @@ let activeSubscription = null;
 const processedRequests = new Set();
 const processedFiles = new Set();
 
-// Update handleFileChange function
+// Add at the top with other global variables
+let telegramConfig = {
+    botToken: process.env.TELEGRAM_BOT_TOKEN,
+    chatId: process.env.TELEGRAM_CHAT_ID
+};
+
+// Add new endpoints for Telegram configuration
+app.get('/telegram-config', ensureAuthenticated, (req, res) => {
+    res.json({
+        botToken: telegramConfig.botToken || '',
+        chatId: telegramConfig.chatId || ''
+    });
+});
+
+app.post('/telegram-config', ensureAuthenticated, async (req, res) => {
+    try {
+        const { botToken, chatId } = req.body;
+        
+        // Test the configuration
+        const testBot = new TelegramBot(botToken, { polling: false });
+        await testBot.getMe(); // Verify bot token is valid
+        
+        // Test sending a message
+        await testBot.sendMessage(chatId, 'Configuration test successful! You will receive OneDrive files in this chat.');
+        
+        // Save the configuration
+        telegramConfig = { botToken, chatId };
+        
+        // Update the main bot instance
+        bot = new TelegramBot(botToken, { polling: false });
+        
+        res.json({ success: true, message: 'Telegram configuration updated successfully' });
+    } catch (error) {
+        console.error('Error updating Telegram config:', error);
+        res.status(400).json({ 
+            success: false, 
+            error: 'Invalid Telegram configuration. Please check your Bot Token and Chat ID.'
+        });
+    }
+});
+
+// Update handleFileChange to use the current configuration
 async function handleFileChange(notification) {
+    if (!telegramConfig.botToken || !telegramConfig.chatId) {
+        throw new Error('Telegram configuration not set');
+    }
+    
     console.log('Handling file change:', notification);
     
     if (!globalAccessToken) {
@@ -482,7 +373,7 @@ async function handleFileChange(notification) {
         console.log('File downloaded:', tempFilePath);
 
         try {
-            await bot.sendDocument(process.env.TELEGRAM_CHAT_ID, tempFilePath);
+            await bot.sendDocument(telegramConfig.chatId, tempFilePath);
             console.log('File sent to Telegram');
         } catch (telegramError) {
             console.error('Error sending to Telegram:', telegramError);
@@ -699,6 +590,13 @@ app.post('/delete-webhook', ensureAuthenticated, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
