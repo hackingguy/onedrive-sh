@@ -1,0 +1,138 @@
+<invoke name="edit_file">
+<parameter name="target_file">src/server.js</parameter>
+<parameter name="instructions">I will update the server.js file with proper webhook handling</parameter>
+<parameter name="code_edit">const express = require('express');
+const { Client } = require('@microsoft/microsoft-graph-client');
+const TelegramBot = require('node-telegram-bot-api');
+const axios = require('axios');
+const fs = require('fs');
+const { getAccessToken } = require('./auth');
+
+const app = express();
+app.use(express.json());
+
+// Initialize Telegram bot
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
+
+// Initialize Microsoft Graph client
+function getAuthenticatedClient(accessToken) {
+    return Client.init({
+        authProvider: (done) => {
+            done(null, accessToken);
+        },
+    });
+}
+
+// Setup webhook subscription
+app.post('/setup-webhook', async (req, res) => {
+    try {
+        const accessToken = await getAccessToken();
+        const client = getAuthenticatedClient(accessToken);
+
+        const subscriptionData = {
+            changeType: 'created,updated',
+            notificationUrl: process.env.WEBHOOK_URL,
+            resource: '/me/drive/root',
+            expirationDateTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            clientState: process.env.WEBHOOK_SECRET
+        };
+
+        console.log('Setting up webhook with:', {
+            notificationUrl: subscriptionData.notificationUrl,
+            expirationDateTime: subscriptionData.expirationDateTime
+        });
+
+        const subscription = await client.api('/subscriptions')
+            .post(subscriptionData);
+
+        // Store subscription info for renewal
+        fs.writeFileSync('subscription.json', JSON.stringify(subscription));
+        
+        res.json({ success: true, subscription });
+    } catch (error) {
+        console.error('Error setting up webhook:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Webhook endpoint for OneDrive notifications
+app.post('/webhook', async (req, res) => {
+    console.log('Received webhook:', req.body);
+    
+    // Handle subscription validation
+    if (req.headers['validation-token']) {
+        console.log('Validating webhook subscription');
+        return res.status(200).send(req.headers['validation-token']);
+    }
+
+    // Validate webhook
+    if (req.body.clientState !== process.env.WEBHOOK_SECRET) {
+        console.error('Invalid webhook secret');
+        return res.status(401).send('Invalid notification');
+    }
+
+    try {
+        const { value: notifications } = req.body;
+        
+        for (const notification of notifications) {
+            if (notification.resourceData.resourceType === 'driveItem') {
+                await handleFileChange(notification);
+            }
+        }
+        
+        res.status(200).send();
+    } catch (error) {
+        console.error('Error processing webhook:', error);
+        res.status(500).send();
+    }
+});
+
+async function handleFileChange(notification) {
+    console.log('Handling file change:', notification);
+    
+    const accessToken = await getAccessToken();
+    const client = getAuthenticatedClient(accessToken);
+    
+    try {
+        // Get file details
+        const driveItem = await client.api(`/drive/items/${notification.resourceData.id}`).get();
+        console.log('Retrieved file details:', driveItem.name);
+        
+        // Download file
+        const response = await axios({
+            url: driveItem['@microsoft.graph.downloadUrl'],
+            method: 'GET',
+            responseType: 'stream'
+        });
+
+        const tempFilePath = `./${driveItem.name}`;
+        const writer = fs.createWriteStream(tempFilePath);
+        
+        response.data.pipe(writer);
+
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+
+        console.log('File downloaded:', tempFilePath);
+
+        // Upload to Telegram
+        await bot.sendDocument(process.env.TELEGRAM_CHAT_ID, tempFilePath);
+        console.log('File sent to Telegram');
+
+        // Clean up temp file
+        fs.unlinkSync(tempFilePath);
+        console.log('Temporary file cleaned up');
+    } catch (error) {
+        console.error('Error handling file change:', error);
+        throw error;
+    }
+}
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});</parameter>
+<parameter name="blocking">true</parameter>
+</invoke> 
